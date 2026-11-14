@@ -5,14 +5,16 @@
 //   project { width, height, aspect, fps, rippleMode, media{}, tracks[] }
 //   media   { id, kind: 'video' | 'audio', duration, width, height, ... }
 //   track   { id, name, kind, muted, hidden, locked, clips[] }  tracks[0] is on top
-//   clip    { id, mediaId, begin, end, markIn, fit, scale, posX, posY, volume, color }
+//   clip    { id, mediaId, begin, end, markIn, fit, scale, posX, posY, volume, color, detached? }
 //
 // begin/end are timeline positions and markIn is the offset into the source,
 // all in ticks (time.js). A clip plays source [markIn, markIn + end - begin).
 //
 // Video tracks hold video files and decide the picture (and its sound); audio
-// tracks hold audio files and are mixed on top. A clip only ever sits on a
-// track of its own kind.
+// tracks hold audio files and are mixed on top. A file from the bin only ever
+// lands on a track of its own kind. The one exception is detachAudio(): it
+// puts the sound of a video clip on an audio track as a clip of its own (same
+// mediaId) and marks the video clip `detached`, which makes it silent.
 
 import { DEFAULT_COLOR } from './color.js';
 import { ASPECTS } from './geometry.js';
@@ -308,6 +310,38 @@ export function moveClip(project, clipId, trackId, desiredBegin) {
   return true;
 }
 
+// A video clip whose sound is still attached and can be split off.
+export function canDetachAudio(project, clipId) {
+  const found = findClip(project, clipId);
+  if (!found || found.track.locked || trackKind(found.track) !== 'video') return false;
+  return Boolean(project.media[found.clip.mediaId]?.hasAudio) && !found.clip.detached;
+}
+
+// Split the sound off video clips: each gets a twin on an audio track at the
+// same position, trim and volume, and goes silent itself. From then on the two
+// are independent clips. The twin must sit exactly under its picture, so it
+// goes to the first unlocked audio track that is free there; a clip with no
+// such track is left alone. Returns the ids of the new audio clips.
+export function detachAudio(project, clipIds) {
+  const made = [];
+  for (const id of clipIds) {
+    if (!canDetachAudio(project, id)) continue;
+    const { clip } = findClip(project, id);
+    const target = project.tracks.find(
+      (track) =>
+        trackKind(track) === 'audio' && !track.locked && !track.clips.some((c) => clip.begin < c.end && clip.end > c.begin),
+    );
+    if (!target) continue;
+    const sound = structuredClone(clip);
+    sound.id = newId(project);
+    target.clips.push(sound);
+    sortTrack(target);
+    clip.detached = true;
+    made.push(sound.id);
+  }
+  return made;
+}
+
 export function deleteClips(project, clipIds) {
   const ids = new Set(clipIds);
   let count = 0;
@@ -373,7 +407,10 @@ export function validate(project) {
     clips.forEach((clip, i) => {
       const media = project.media[clip.mediaId];
       if (!media) problems.push(`${clip.id}: missing media`);
-      else if (mediaKind(media) !== trackKind(track)) problems.push(`${clip.id}: ${mediaKind(media)} clip on a ${trackKind(track)} track`);
+      else if (trackKind(track) === 'audio' ? mediaKind(media) !== 'audio' && !media.hasAudio : mediaKind(media) !== 'video') {
+        // An audio track also takes the detached sound of a video file.
+        problems.push(`${clip.id}: ${mediaKind(media)} clip on a ${trackKind(track)} track`);
+      }
       if (clip.begin < 0) problems.push(`${clip.id}: starts before zero`);
       if (clip.end <= clip.begin) problems.push(`${clip.id}: empty or reversed`);
       if (clip.markIn < 0) problems.push(`${clip.id}: negative source offset`);

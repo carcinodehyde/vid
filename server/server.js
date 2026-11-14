@@ -176,6 +176,13 @@ async function handle(req, res) {
   match = /^\/thumb\/([\w]+)$/.exec(route);
   if (match) return sendFile(req, res, media.thumbPath(match[1]), { cache: 'max-age=3600' });
 
+  match = /^\/wave\/([\w]+)$/.exec(route);
+  if (match) {
+    const filePath = await media.waveform(match[1]).catch(() => null);
+    if (!filePath) throw new HttpError(404, 'No waveform');
+    return sendFile(req, res, filePath, { cache: 'max-age=3600' });
+  }
+
   if (route === '/api/export' && method === 'POST') {
     const { project } = await readJson(req);
     if (!project || !Array.isArray(project.tracks)) throw new HttpError(400, 'Not a project');

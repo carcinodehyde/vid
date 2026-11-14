@@ -5,7 +5,9 @@ import { isIdentityColor } from '/shared/color.js';
 import {
   addClip,
   allClips,
+  canDetachAudio,
   deleteClips,
+  detachAudio,
   findClip,
   moveClip,
   setTrackFlag,
@@ -29,6 +31,7 @@ export function initTimeline(store) {
   const playhead = $('tl-playhead');
   const ruler = $('tl-ruler');
   const zoom = $('zoom');
+  const status = $('tl-status');
 
   const toPx = (ticks) => (ticks / TICKS) * store.pxPerSec;
   const toTicks = (px) => (px / store.pxPerSec) * TICKS;
@@ -91,7 +94,11 @@ export function initTimeline(store) {
           el.title = media?.name ?? 'Missing media';
           const thumbs = document.createElement('div');
           thumbs.className = 'clip-thumbs';
-          thumbs.style.backgroundImage = `url("/thumb/${clip.mediaId}")`;
+          thumbs.style.backgroundImage = `url("/${audio ? 'wave' : 'thumb'}/${clip.mediaId}")`;
+          if (!audio && clip.detached) {
+            el.classList.add('detached');
+            el.title += '\nAudio detached: this clip is silent';
+          }
           if (audio && media) {
             // The poster is the whole file's waveform: stretch it to the source
             // length and slide it so the visible part matches the trim.
@@ -312,6 +319,17 @@ export function initTimeline(store) {
       const ids = [...store.selection];
       store.history.commit('Delete', (p) => deleteClips(p, ids));
     },
+    detach() {
+      // Move the sound of the selected video clips onto an audio track.
+      const ids = [...store.selection].filter((id) => canDetachAudio(store.project, id));
+      if (!ids.length) return;
+      const made = store.history.commit('Detach audio', (p) => detachAudio(p, ids));
+      if (made.length) store.select(made);
+      const missed = ids.length - made.length;
+      status.textContent = missed
+        ? `No free audio track under ${ids.length === 1 ? 'that clip' : `${missed} of the clips`}: make room on an audio track (or unlock it) first.`
+        : '';
+    },
     zoomFit() {
       const seconds = Math.max(5, store.duration / TICKS);
       store.setZoom((scroll.clientWidth - 40) / seconds);
@@ -321,6 +339,7 @@ export function initTimeline(store) {
 
   $('split').addEventListener('click', actions.split);
   $('delete').addEventListener('click', actions.remove);
+  $('detach').addEventListener('click', actions.detach);
   $('zoom-fit').addEventListener('click', actions.zoomFit);
   $('ripple').addEventListener('change', (event) => {
     store.history.commit('Toggle ripple', (p) => {
@@ -347,6 +366,7 @@ export function initTimeline(store) {
   function renderToolbar() {
     $('ripple').checked = store.project.rippleMode;
     $('delete').disabled = store.selection.size === 0;
+    $('detach').disabled = ![...store.selection].some((id) => canDetachAudio(store.project, id));
   }
 
   store.on('project', () => {
@@ -355,6 +375,7 @@ export function initTimeline(store) {
     renderToolbar();
   });
   store.on('selection', () => {
+    status.textContent = '';
     for (const el of lanes.querySelectorAll('.clip')) el.classList.toggle('selected', store.selection.has(el.dataset.id));
     renderToolbar();
   });

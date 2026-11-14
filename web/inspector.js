@@ -151,18 +151,21 @@ export function initInspector(store) {
       );
     }
 
-    nodes.push(
-      group('Audio'),
-      slider({
-        label: 'Volume',
-        min: 0,
-        max: 200,
-        unit: '%',
-        read: (clip) => clip.volume * 100,
-        patch: (value) => ({ volume: value / 100 }),
-        fallback: 100,
-      }),
-    );
+    // A clip whose sound was detached has nothing to turn up or down.
+    if (ids.some((id) => !findClip(store.project, id).clip.detached)) {
+      nodes.push(
+        group('Audio'),
+        slider({
+          label: 'Volume',
+          min: 0,
+          max: 200,
+          unit: '%',
+          read: (clip) => clip.volume * 100,
+          patch: (value) => ({ volume: value / 100 }),
+          fallback: 100,
+        }),
+      );
+    }
 
     let lastGroup = null;
     for (const param of pictures ? COLOR_PARAMS : []) {
@@ -191,7 +194,10 @@ export function initInspector(store) {
   }
 
   function refresh() {
-    const key = selectedIds().join(',');
+    // Detaching a clip's audio changes which controls it has.
+    const key = selectedIds()
+      .map((id) => `${id}${findClip(store.project, id)?.clip.detached ? '*' : ''}`)
+      .join(',');
     if (key !== builtFor) {
       builtFor = key;
       build();

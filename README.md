@@ -28,6 +28,11 @@ exports are kept (default `data/`).
   one. Audio clips are mixed on top of the sound of the picture, each with its
   own volume, and the timeline runs to the end of the longest track (black
   picture once the video is over).
+- **Detach audio**: select video clips and press "Detach audio". Each clip's
+  sound becomes a clip of its own on the first audio track that is free under
+  it (same position, trim and volume) and the video clip goes silent ("no
+  audio" badge). The two are then independent: move, trim, split or delete
+  either one. Undo puts the sound back.
 - **Aspect ratio**: the top-bar select. Clips keep their settings and re-fit;
   Fit / Fill / Stretch, Scale and Position are per clip in the inspector.
 - **Colour**: ten sliders per clip (white balance, light, colour).
@@ -51,8 +56,9 @@ exports are kept (default `data/`).
 ## Limits
 
 - No stills or titles; two video and two audio tracks.
-- A video clip's sound stays attached to it (it cannot be split off onto an
-  audio track), and only the visible video clip is heard. No fades or keyframes.
+- Of the video clips with their sound still attached, only the visible one is
+  heard. Detached audio is not linked to its picture (moving one does not move
+  the other) and cannot be re-attached except by undo. No fades or keyframes.
 - The upper track simply covers the lower one: no blending, opacity or transitions.
 - Preview volume stops at 100 %; the export applies the full 0-200 %.
 - Colour is applied to display-referred 8-bit values; no HDR or colour management.

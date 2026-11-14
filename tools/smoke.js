@@ -348,6 +348,49 @@ async function main() {
       return out;
     `);
     check('audio keeps playing over black after the picture ends', tail.playing && tail.pausedAfter && tail.moved > 0.7 && tail.moved < 1.6 && isBlack(tail.black), `${tail.moved.toFixed(2)} s in 1.2 s`);
+
+    // 5c. Detach audio --------------------------------------------------------
+    const detached = await cdp.run(`
+      const button = document.getElementById('detach');
+      vid.store.select([${JSON.stringify(placed.id)}]);
+      await T.frames(2);
+      const offForAudio = button.disabled;
+      vid.store.select([${JSON.stringify(clipA)}]);
+      await T.frames(2);
+      const onForVideo = !button.disabled;
+      button.click();
+      await T.frames(2);
+      const source = vid.model.findClip(vid.store.project, ${JSON.stringify(clipA)}).clip;
+      const twin = vid.model.getTrack(vid.store.project, 'A2').clips[0];
+      const wave = await fetch('/wave/' + source.mediaId);
+      return {
+        offForAudio,
+        onForVideo,
+        offAfter: button.disabled,
+        silent: source.detached === true,
+        twin: twin ? [twin.mediaId === source.mediaId, twin.begin === source.begin, twin.end === source.end, twin.markIn === source.markIn].join() : 'none',
+        selected: twin ? vid.store.selection.has(twin.id) : false,
+        sliders: [...document.querySelectorAll('#inspector input[type=range]')].map((s) => s.getAttribute('aria-label')).join(),
+        badge: document.querySelectorAll('#tl-lanes .clip.detached').length,
+        wave: wave.status + ' ' + wave.headers.get('content-type'),
+        problems: vid.model.validate(vid.store.project).join('; '),
+      };
+    `);
+    check('Detach audio is offered for video clips only', detached.offForAudio && detached.onForVideo && detached.offAfter);
+    check('detaching puts the clip\'s sound on A2 under the picture', detached.silent && detached.twin === 'true,true,true,true' && detached.selected && detached.badge === 1 && detached.problems === '', `twin ${detached.twin} ${detached.problems}`);
+    check('the detached clip is an audio clip with a waveform', detached.sliders === 'Volume' && detached.wave === '200 image/jpeg', `${detached.sliders}; ${detached.wave}`);
+    const detachedPlay = await cdp.run(`
+      await T.at(0.5);
+      vid.store.setPlaying(true);
+      await new Promise((r) => setTimeout(r, 1200));
+      const video = vid.player.videos.get(${JSON.stringify(mediaA.id)});
+      const el = vid.player.audios.get('A2:' + ${JSON.stringify(mediaA.id)})?.el;
+      const out = { pictureMuted: video.muted, playing: Boolean(el) && !el.paused, drift: el ? Math.abs(el.currentTime - vid.store.time / 705600000) : 9 };
+      vid.store.setPlaying(false);
+      return out;
+    `);
+    check('preview plays the detached sound and silences the picture', detachedPlay.pictureMuted && detachedPlay.playing && detachedPlay.drift < 0.15, `drift ${(detachedPlay.drift * 1000).toFixed(0)} ms`);
+
     await cdp.run(`vid.store.select([${JSON.stringify(placed.id)}]); await T.at(8);`);
     const editorShot = await shot('editor.png');
 
@@ -393,7 +436,7 @@ async function main() {
     await cdp.send('Page.reload');
     await waitFor('the reloaded app', () => cdp.run('return Boolean(window.vid)'));
     await cdp.run(PAGE_HELPERS);
-    check('reload restores the saved project', (await cdp.run('return T.clips()')) === 4 && (await cdp.run('return vid.store.project.aspect')) === '9:16');
+    check('reload restores the saved project', (await cdp.run('return T.clips()')) === 5 && (await cdp.run('return vid.store.project.aspect')) === '9:16');
 
     const ignorable = (line) => /favicon/.test(line);
     const problems = cdp.problems.filter((line) => !ignorable(line));

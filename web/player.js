@@ -173,7 +173,7 @@ export class Player {
     if (active) {
       const { clip, track } = hit;
       const target = (clip.markIn + (lookup - clip.begin)) / TICKS;
-      active.muted = track.muted;
+      active.muted = track.muted || Boolean(clip.detached);
       active.volume = Math.min(1, clip.volume);
 
       if (store.playing) {

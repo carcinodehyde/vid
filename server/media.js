@@ -9,6 +9,8 @@ import path from 'node:path';
 
 import { TICKS } from '../shared/time.js';
 
+const WAVEFORM = 'aformat=channel_layouts=mono,showwavespic=s=1600x120:colors=0x5ad1c0:scale=sqrt:draw=full';
+
 export function run(command, args, { cwd, onStdout } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, windowsHide: true });
@@ -122,6 +124,26 @@ export class MediaStore {
     return path.join(this.cacheDir, `${id}.jpg`);
   }
 
+  // The waveform picture of a source's sound. An audio file's poster already
+  // is one; for a video file it is drawn the first time it is asked for.
+  async waveform(id) {
+    const info = this.get(id);
+    if (!info || !info.hasAudio) return null;
+    if (info.kind === 'audio') return this.thumbPath(id);
+    const target = path.join(this.cacheDir, `${id}.wave.jpg`);
+    if (await fs.stat(target).catch(() => null)) return target;
+    this.waves ??= new Map();
+    if (!this.waves.has(id)) {
+      const partial = `${target}.part.jpg`;
+      const job = run('ffmpeg', ['-v', 'error', '-i', info.path, '-filter_complex', WAVEFORM, '-frames:v', '1', '-q:v', '3', '-y', partial])
+        .then(() => fs.rename(partial, target))
+        .then(() => target)
+        .finally(() => this.waves.delete(id));
+      this.waves.set(id, job);
+    }
+    return this.waves.get(id);
+  }
+
   proxyPath(id) {
     return path.join(this.cacheDir, `${id}.proxy.mp4`);
   }
@@ -159,7 +181,7 @@ export class MediaStore {
     const seconds = info.duration / TICKS;
     const poster =
       info.kind === 'audio'
-        ? ['-i', absolute, '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=1600x120:colors=0x5ad1c0:scale=sqrt:draw=full', '-frames:v', '1', '-q:v', '3']
+        ? ['-i', absolute, '-filter_complex', WAVEFORM, '-frames:v', '1', '-q:v', '3']
         : ['-ss', String(Math.min(5, seconds * 0.1).toFixed(3)), '-i', absolute, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '4'];
     await run('ffmpeg', ['-v', 'error', ...poster, '-y', this.thumbPath(id)]).catch(() => {});
 

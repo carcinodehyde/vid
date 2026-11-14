@@ -81,7 +81,8 @@ export function buildExport(project, resolveMediaPath, outputPath) {
         `${TO_YUV},setsar=1,trim=duration=${duration},setpts=PTS-STARTPTS[v${i}]`,
     );
 
-    if (media.hasAudio && !span.track.muted && clip.volume > 0) {
+    // A clip whose sound was detached is silent; its twin is mixed in below.
+    if (media.hasAudio && !clip.detached && !span.track.muted && clip.volume > 0) {
       filters.push(
         `[${input}:a]${AUDIO},volume=${clip.volume.toFixed(3)},apad,atrim=duration=${duration},asetpts=PTS-STARTPTS[a${i}]`,
       );

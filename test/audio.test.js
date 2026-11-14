@@ -6,12 +6,16 @@ import {
   addClip,
   addMedia,
   audioClipsAt,
+  canDetachAudio,
   clipAt,
   createProject,
+  deleteClips,
+  detachAudio,
   findClip,
   getTrack,
   moveClip,
   projectDuration,
+  splitClip,
   updateClips,
   upgradeProject,
   validate,
@@ -107,4 +111,72 @@ test('projects saved before audio tracks existed are upgraded', () => {
   upgradeProject(old);
   assert.deepEqual(old.tracks.map((track) => track.kind), ['video', 'video', 'audio', 'audio']);
   assert.equal(old.media.m.kind, 'video');
+});
+
+test('detaching audio puts the sound of a video clip on an audio track', () => {
+  const project = mixedProject();
+  const video = addClip(project, { mediaId: 'v', at: 2 * S });
+  splitClip(project, video, 3 * S);
+  updateClips(project, [video], { volume: 0.5 });
+  assert.equal(canDetachAudio(project, video), true);
+
+  const [sound] = detachAudio(project, [video]);
+  const twin = findClip(project, sound);
+  assert.equal(twin.track.id, 'A1');
+  assert.deepEqual(
+    [twin.clip.mediaId, twin.clip.begin, twin.clip.end, twin.clip.markIn, twin.clip.volume],
+    ['v', 2 * S, 3 * S, 0, 0.5],
+  );
+  assert.equal(findClip(project, video).clip.detached, true);
+  assert.deepEqual(validate(project), []);
+
+  // Once is enough, and the picture is still the picture.
+  assert.equal(canDetachAudio(project, video), false);
+  assert.deepEqual(detachAudio(project, [video, sound]), []);
+  assert.equal(clipAt(project, 2.5 * S).clip.id, video);
+
+  // The two halves are independent from here on.
+  moveClip(project, sound, 'A2', 6 * S);
+  assert.equal(findClip(project, sound).clip.begin, 6 * S);
+  assert.equal(findClip(project, video).clip.begin, 2 * S);
+});
+
+test('detached audio needs a free, unlocked audio track under the clip', () => {
+  const project = mixedProject();
+  const video = addClip(project, { mediaId: 'v' });
+  addClip(project, { mediaId: 'a', trackId: 'A1' });
+  const [sound] = detachAudio(project, [video]);
+  assert.equal(findClip(project, sound).track.id, 'A2');
+
+  const blocked = mixedProject();
+  const other = addClip(blocked, { mediaId: 'v' });
+  addClip(blocked, { mediaId: 'a', trackId: 'A1' });
+  getTrack(blocked, 'A2').locked = true;
+  assert.deepEqual(detachAudio(blocked, [other]), []);
+  assert.equal(findClip(blocked, other).clip.detached, undefined);
+
+  const silent = createProject();
+  addMedia(silent, { id: 'n', kind: 'video', name: 'n.mp4', duration: S, width: 640, height: 360, hasAudio: false });
+  assert.equal(canDetachAudio(silent, addClip(silent, { mediaId: 'n' })), false);
+});
+
+test('export takes detached sound from the audio track, not from the picture', () => {
+  const project = mixedProject();
+  const video = addClip(project, { mediaId: 'v' });
+  const [sound] = detachAudio(project, [video]);
+  moveClip(project, sound, 'A1', 1 * S);
+  const graphOf = () => {
+    const plan = buildExport(project, (id) => `${id}.src`, 'out.mp4');
+    return plan.args[plan.args.indexOf('-filter_complex') + 1];
+  };
+
+  let graph = graphOf();
+  assert.doesNotMatch(graph, /\[0:a\]/);
+  assert.match(graph, /\[1:a\][^;]*adelay=48000S:all=1\[m0\]/);
+
+  // Deleting the audio clip leaves a silent picture.
+  deleteClips(project, [sound]);
+  graph = graphOf();
+  assert.doesNotMatch(graph, /\[\d:a\]/);
+  assert.doesNotMatch(graph, /amix/);
 });
