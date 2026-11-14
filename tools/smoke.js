@@ -439,6 +439,45 @@ async function main() {
     await cdp.run(PAGE_HELPERS);
     check('reload restores the saved project', (await cdp.run('return T.clips()')) === 5 && (await cdp.run('return vid.store.project.aspect')) === '9:16');
 
+    // 8. New project ----------------------------------------------------------
+    const kept = await cdp.run(`
+      document.getElementById('new-project').click();
+      const open = document.getElementById('reset-dialog').open;
+      document.getElementById('reset-cancel').click();
+      return { open, closed: !document.getElementById('reset-dialog').open, clips: T.clips() };
+    `);
+    check('New project asks first, and Cancel changes nothing', kept.open && kept.closed && kept.clips === 5);
+    const wiped = await cdp.run(`
+      document.getElementById('new-project').click();
+      document.getElementById('reset-confirm').click();
+      const deadline = performance.now() + 10000;
+      while (document.getElementById('reset-dialog').open && performance.now() < deadline) await T.frames(2);
+      const p = vid.store.project;
+      return {
+        closed: !document.getElementById('reset-dialog').open,
+        clips: T.clips(),
+        media: Object.keys(p.media).length,
+        aspect: p.aspect,
+        undo: vid.store.history.canUndo,
+        cards: document.querySelectorAll('#bin-list .media').length,
+        drawn: document.querySelectorAll('#tl-lanes .clip').length,
+        players: vid.player.videos.size + vid.player.audios.size,
+        exportOff: document.getElementById('export').disabled,
+      };
+    `);
+    check('confirming empties the project, the bin, the timeline and undo', wiped.closed && wiped.clips === 0 && wiped.media === 0 && wiped.aspect === '16:9' && !wiped.undo && wiped.cards === 0 && wiped.drawn === 0 && wiped.players === 0 && wiped.exportOff, JSON.stringify(wiped));
+    await sleep(1200); // longer than the autosave delay: nothing may write the old project back
+    const left = {
+      project: existsSync(path.join(dataDir, 'project.json')),
+      cache: (await fs.readdir(path.join(dataDir, 'cache'))).length,
+      exports: (await fs.readdir(path.join(dataDir, 'exports'))).filter((name) => name.endsWith('.mp4')).length,
+    };
+    check('the saved project and cache are deleted, exports are kept', !left.project && left.cache === 0 && left.exports === 1, JSON.stringify(left));
+    await cdp.send('Page.reload');
+    await waitFor('the reloaded app', () => cdp.run('return Boolean(window.vid)'));
+    await cdp.run(PAGE_HELPERS);
+    check('the project is still empty after a reload', (await cdp.run('return T.clips() + Object.keys(vid.store.project.media).length')) === 0);
+
     const ignorable = (line) => /favicon/.test(line);
     const problems = cdp.problems.filter((line) => !ignorable(line));
     check('no page errors', problems.length === 0, problems.slice(0, 5).join(' | '));

@@ -36,6 +36,9 @@ macOS, an AppImage on Linux. The build is unsigned and uses the default icon.
 
 ## Using it
 
+- **New project**: the top-bar button empties everything after an "are you
+  sure" prompt: clips, imported media, settings, undo history, and the cached
+  thumbnails and upload copies on disk. Original files and exports are kept.
 - **Import**: "Import files", paste a path, or drop files on the window.
 - **Timeline**: drag a card onto a track or double-click it. Drag clips to move,
   drag their edges to trim, `S` splits at the playhead, `Delete` removes.

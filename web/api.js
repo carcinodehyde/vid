@@ -16,6 +16,7 @@ const json = (method, value) => ({
 export const api = {
   loadProject: async () => (await request('/api/project')).project,
   saveProject: (project) => request('/api/project', json('PUT', { project })),
+  resetProject: () => request('/api/reset', { method: 'POST' }),
   importPath: async (path) => (await request('/api/import', json('POST', { path }))).media,
   upload: async (file) =>
     (await request(`/api/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file })).media,

@@ -152,6 +152,17 @@ export class MediaStore {
     return this.items.get(id) ?? null;
   }
 
+  // Forget every import: probe results, posters, waveforms, preview copies and
+  // the copies made of uploaded files. Files imported by path are not touched.
+  async clear() {
+    this.items.clear();
+    for (const dir of [this.cacheDir, this.uploadDir]) {
+      for (const file of await fs.readdir(dir).catch(() => [])) {
+        await fs.rm(path.join(dir, file), { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  }
+
   thumbPath(id) {
     return path.join(this.cacheDir, `${id}.jpg`);
   }

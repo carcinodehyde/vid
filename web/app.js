@@ -147,11 +147,47 @@ async function main() {
   syncProject();
   syncPlaying();
 
+  // ---- New project ---------------------------------------------------------
+  // Wipes the project, the undo history and everything imported, after asking.
+  const resetDialog = $('reset-dialog');
+  const resetStatus = $('reset-status');
+  async function resetProject() {
+    store.setPlaying(false);
+    // A save still waiting or in flight must not write the old project back.
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    await saving;
+    await api.resetProject();
+    store.mediaStatus.clear();
+    store.selection = new Set();
+    store.time = 0;
+    store.history.reset(model.createProject());
+    store.emit('selection');
+    store.emit('time');
+    saveState.textContent = '';
+  }
+  $('new-project').addEventListener('click', () => {
+    resetStatus.textContent = '';
+    $('reset-confirm').disabled = false;
+    resetDialog.showModal();
+  });
+  $('reset-cancel').addEventListener('click', () => resetDialog.close());
+  $('reset-confirm').addEventListener('click', async () => {
+    $('reset-confirm').disabled = true;
+    try {
+      await resetProject();
+      resetDialog.close();
+    } catch (error) {
+      resetStatus.textContent = error.message;
+      $('reset-confirm').disabled = false;
+    }
+  });
+
   // ---- Keyboard -----------------------------------------------------------
   window.addEventListener('keydown', (event) => {
     const tag = event.target.tagName;
     const typing = tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && event.target.type !== 'range' && event.target.type !== 'checkbox');
-    if (typing || $('export-dialog').open) return;
+    if (typing || document.querySelector('dialog[open]')) return;
     const mod = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
 
@@ -228,7 +264,7 @@ async function main() {
   $('export-close').addEventListener('click', () => dialog.close());
 
   // Handle for the console and the smoke test.
-  window.vid = { store, renderer, player, timeline, bin, api, model, runExport, save };
+  window.vid = { store, renderer, player, timeline, bin, api, model, runExport, save, resetProject };
 }
 
 main().catch((error) => {

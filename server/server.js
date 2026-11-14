@@ -141,6 +141,15 @@ async function handle(req, res) {
     }
   }
 
+  // Start from zero: drop the saved project and everything imported for it.
+  // Finished exports are kept.
+  if (route === '/api/reset' && method === 'POST') {
+    if (exportsQueue.busy) throw new HttpError(409, 'An export is still running.');
+    await fs.rm(PROJECT_FILE, { force: true });
+    await media.clear();
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (route === '/api/import' && method === 'POST') {
     const body = await readJson(req);
     const filePath = String(body.path || '').trim().replace(/^"(.*)"$/, '$1');

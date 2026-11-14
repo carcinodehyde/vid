@@ -9,6 +9,7 @@
 <body>
   <header class="topbar">
     <strong class="brand">vid</strong>
+    <button id="new-project" title="Remove everything and start an empty project">New project</button>
     <div class="group">
       <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
       <button id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
@@ -92,6 +93,17 @@
     <div class="dialog-actions">
       <a id="export-link" class="button primary" hidden>Open video</a>
       <button id="export-close">Close</button>
+    </div>
+  </dialog>
+
+  <dialog id="reset-dialog" aria-labelledby="reset-title">
+    <h2 id="reset-title">Start a new project?</h2>
+    <p>Are you sure? This removes every clip and all imported media from the editor and resets the project settings. It cannot be undone.</p>
+    <p class="muted">Your original files and finished exports stay on disk. Copies made by "Import files" or drag and drop are deleted.</p>
+    <p id="reset-status" class="status error" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button id="reset-cancel" autofocus>Cancel</button>
+      <button id="reset-confirm" class="danger">Delete everything</button>
     </div>
   </dialog>
 

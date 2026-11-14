@@ -148,6 +148,10 @@ export class ExportQueue {
     return this.jobs.get(id) ?? null;
   }
 
+  get busy() {
+    return [...this.jobs.values()].some((job) => job.state === 'running');
+  }
+
   async start(project) {
     await fs.mkdir(this.dir, { recursive: true });
     const id = `x${Date.now().toString(36)}${(this.counter += 1)}`;
