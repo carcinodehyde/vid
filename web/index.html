@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vid editor</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong class="brand">vid</strong>
+    <div class="group">
+      <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+      <button id="redo" title="Redo (Ctrl+Shift+Z)">Redo</button>
+    </div>
+    <div class="group">
+      <label for="aspect">Aspect ratio</label>
+      <select id="aspect"></select>
+      <span id="resolution" class="muted mono"></span>
+    </div>
+    <div class="group">
+      <label for="fps">Frame rate</label>
+      <select id="fps"></select>
+    </div>
+    <span id="save-state" class="muted" aria-live="polite"></span>
+    <button id="export" class="primary">Export</button>
+  </header>
+
+  <main class="workspace">
+    <section class="panel bin" aria-label="Media">
+      <h2>Media</h2>
+      <div class="bin-actions">
+        <button id="import-files">Import files</button>
+        <input id="file-input" type="file" accept="video/*,.mkv,.mov,.mp4,.webm,.avi,.m4v" multiple hidden>
+        <form id="import-path-form">
+          <input id="import-path" type="text" placeholder="or paste a file path" spellcheck="false" autocomplete="off">
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <p id="bin-status" class="status" aria-live="polite"></p>
+      <div id="bin-list" class="bin-list"></div>
+    </section>
+
+    <section class="preview" aria-label="Preview">
+      <div id="stage" class="stage"><canvas id="canvas"></canvas></div>
+      <div class="transport">
+        <button id="to-start" title="Go to start (Home)">Start</button>
+        <button id="step-back" title="Previous frame (Left)">-1</button>
+        <button id="play" class="primary" title="Play / pause (Space)">Play</button>
+        <button id="step-forward" title="Next frame (Right)">+1</button>
+        <button id="to-end" title="Go to end (End)">End</button>
+        <span id="timecode" class="mono timecode">00:00:00:00</span>
+        <span id="duration" class="mono muted"></span>
+      </div>
+    </section>
+
+    <section class="panel inspector" aria-label="Inspector">
+      <h2>Inspector</h2>
+      <div id="inspector"></div>
+    </section>
+  </main>
+
+  <section class="timeline" aria-label="Timeline">
+    <div class="tl-toolbar">
+      <button id="split" title="Split at playhead (S)">Split</button>
+      <button id="delete" title="Delete selected (Delete)">Delete</button>
+      <label class="toggle" title="Ripple: deleting, trimming and inserting slide the later clips"><input id="ripple" type="checkbox"> Ripple</label>
+      <span class="spacer"></span>
+      <label for="zoom">Zoom</label>
+      <input id="zoom" type="range" min="0" max="100" value="45">
+      <button id="zoom-fit" title="Fit the whole timeline">Fit</button>
+    </div>
+    <div class="tl-body">
+      <div id="tl-heads" class="tl-heads"></div>
+      <div id="tl-scroll" class="tl-scroll">
+        <div id="tl-content" class="tl-content">
+          <div class="tl-ruler"><canvas id="tl-ruler"></canvas></div>
+          <div id="tl-lanes"></div>
+          <div id="tl-playhead" class="tl-playhead"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="export-dialog">
+    <h2>Export</h2>
+    <p id="export-status">Starting...</p>
+    <progress id="export-progress" max="1" value="0"></progress>
+    <p id="export-result" class="mono"></p>
+    <div class="dialog-actions">
+      <a id="export-link" class="button primary" hidden>Open video</a>
+      <button id="export-close">Close</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
