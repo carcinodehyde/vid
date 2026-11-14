@@ -1,7 +1,7 @@
 // Media bin: import files (upload, pasted path, or drop onto the window) and
 // list them as cards that can be dragged onto the timeline.
 
-import { addClip, addMedia } from '/shared/model.js';
+import { addClip, addMedia, mediaKind } from '/shared/model.js';
 import { TICKS } from '/shared/time.js';
 import { api } from './api.js';
 import { MEDIA_MIME } from './timeline-view.js';
@@ -37,16 +37,17 @@ export function initBin(store) {
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'bin-empty';
-      empty.textContent = 'Import a video, then drag it onto a track.';
+      empty.textContent = 'Import video or audio, then drag it onto a track.';
       list.replaceChildren(empty);
       return;
     }
     list.replaceChildren(
       ...items.map((media) => {
         const card = document.createElement('div');
-        card.className = 'media';
+        const audio = mediaKind(media) === 'audio';
+        card.className = audio ? 'media audio' : 'media';
         card.draggable = true;
-        card.title = `${media.path}\nDouble-click to add at the end of V1`;
+        card.title = `${media.path}\nDouble-click to add at the end of ${audio ? 'the first audio track' : 'V1'}`;
         const img = document.createElement('img');
         img.src = `/thumb/${media.id}`;
         img.alt = '';
@@ -57,7 +58,9 @@ export function initBin(store) {
         name.textContent = media.name;
         const meta = document.createElement('div');
         meta.className = 'media-meta';
-        meta.textContent = `${clock(media.duration)} · ${media.width}×${media.height} · ${media.videoCodec}`;
+        meta.textContent = audio
+          ? `${clock(media.duration)} · audio · ${media.audioCodec}`
+          : `${clock(media.duration)} · ${media.width}×${media.height} · ${media.videoCodec}`;
         text.append(name, meta);
         const state = STATUS_TEXT[store.mediaStatus.get(media.id)];
         if (state) {
@@ -72,7 +75,7 @@ export function initBin(store) {
           event.dataTransfer.effectAllowed = 'copy';
         });
         card.addEventListener('dblclick', () => {
-          const id = store.history.commit('Add clip', (p) => addClip(p, { mediaId: media.id, trackId: 'V1' }));
+          const id = store.history.commit('Add clip', (p) => addClip(p, { mediaId: media.id }));
           if (id) store.select([id]);
         });
         return card;

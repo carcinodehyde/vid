@@ -10,6 +10,7 @@ import {
   moveClip,
   setTrackFlag,
   splitAt,
+  trackKind,
   trimClip,
 } from '/shared/model.js';
 import { TICKS, formatTimecode, snapToFrame } from '/shared/time.js';
@@ -39,7 +40,9 @@ export function initTimeline(store) {
     heads.replaceChildren(
       ...store.project.tracks.map((track) => {
         const head = document.createElement('div');
+        const audio = trackKind(track) === 'audio';
         head.className = 'tl-head';
+        head.classList.toggle('audio', audio);
         const name = document.createElement('b');
         name.textContent = track.name;
         head.append(name);
@@ -48,6 +51,7 @@ export function initTimeline(store) {
           ['hidden', 'H', 'Hide'],
           ['locked', 'L', 'Lock'],
         ]) {
+          if (audio && flag === 'hidden') continue; // nothing to hide on a sound track
           const button = document.createElement('button');
           button.textContent = label;
           button.title = `${title} ${track.name}`;
@@ -70,14 +74,16 @@ export function initTimeline(store) {
     lanes.replaceChildren(
       ...project.tracks.map((track) => {
         const lane = document.createElement('div');
+        const audio = trackKind(track) === 'audio';
         lane.className = 'tl-lane';
+        lane.classList.toggle('audio', audio);
         lane.dataset.track = track.id;
         lane.classList.toggle('locked', track.locked);
         lane.classList.toggle('hidden', track.hidden);
         for (const clip of track.clips) {
           const media = project.media[clip.mediaId];
           const el = document.createElement('div');
-          el.className = 'clip';
+          el.className = audio ? 'clip audio' : 'clip';
           el.dataset.id = clip.id;
           el.classList.toggle('selected', store.selection.has(clip.id));
           el.style.left = `${toPx(clip.begin)}px`;
@@ -86,11 +92,17 @@ export function initTimeline(store) {
           const thumbs = document.createElement('div');
           thumbs.className = 'clip-thumbs';
           thumbs.style.backgroundImage = `url("/thumb/${clip.mediaId}")`;
+          if (audio && media) {
+            // The poster is the whole file's waveform: stretch it to the source
+            // length and slide it so the visible part matches the trim.
+            thumbs.style.backgroundSize = `${toPx(media.duration)}px 100%`;
+            thumbs.style.backgroundPosition = `${-toPx(clip.markIn)}px 0`;
+          }
           const name = document.createElement('span');
           name.className = 'clip-name';
           name.textContent = media?.name ?? 'Missing media';
           el.append(thumbs, name);
-          if (!isIdentityColor(clip.color)) {
+          if (!audio && !isIdentityColor(clip.color)) {
             const dot = document.createElement('span');
             dot.className = 'clip-graded';
             dot.title = 'Color corrected';

@@ -29,6 +29,13 @@ const MIME = {
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
   '.mkv': 'video/x-matroska',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.flac': 'audio/flac',
 };
 
 const media = new MediaStore(DATA_DIR);

@@ -148,7 +148,7 @@ async function main() {
   await fs.mkdir(outDir, { recursive: true });
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vid-smoke-data-'));
   const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'vid-smoke-chrome-'));
-  const [landscape, portrait] = await makeSamples();
+  const [landscape, portrait, tone] = await makeSamples();
   const children = [];
 
   try {
@@ -278,10 +278,9 @@ async function main() {
       document.querySelectorAll('#bin-list .media')[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
       await T.at(8);
     `);
-    const duration = await cdp.run('return vid.store.duration / 705600000');
+    let duration = await cdp.run('return vid.store.duration / 705600000');
     check('double-click appends the second clip', (await cdp.run('return T.clips()')) === 3 && Math.abs(duration - 10) < 0.05, `duration ${duration.toFixed(2)} s`);
     check('second clip draws', !isBlack(await cdp.run('return T.px(0.5, 0.5)')));
-    const editorShot = await shot('editor.png');
 
     const played = await cdp.run(`
       await T.at(0.5);
@@ -293,6 +292,64 @@ async function main() {
       return moved;
     `);
     check('playback advances the playhead in real time', played > 1.2 && played < 3.2, `${played.toFixed(2)} s in 2.5 s`);
+
+    // 5b. Audio file ----------------------------------------------------------
+    const toneMedia = await cdp.run(`const p = ${JSON.stringify(tone)}; return vid.bin.importOne(p, () => vid.api.importPath(p));`);
+    check('audio file imports as audio', toneMedia?.kind === 'audio' && toneMedia.hasAudio, toneMedia ? `${toneMedia.audioCodec}, ${(toneMedia.duration / 705600000).toFixed(1)} s` : 'import failed');
+    check('audio card shows a waveform', await cdp.run(`
+      const img = document.querySelectorAll('#bin-list .media.audio img')[0];
+      if (!img) return false;
+      await img.decode().catch(() => {});
+      return img.naturalWidth > 0;
+    `));
+    const placed = await cdp.run(`
+      document.querySelector('#bin-list .media.audio').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      await T.frames(2);
+      const a1 = vid.model.getTrack(vid.store.project, 'A1');
+      return {
+        onA1: a1.clips.length,
+        id: a1.clips[0]?.id,
+        drawn: document.querySelectorAll('#tl-lanes .tl-lane.audio .clip.audio').length,
+        lanes: document.querySelectorAll('#tl-lanes .tl-lane').length,
+        sliders: [...document.querySelectorAll('#inspector input[type=range]')].map((s) => s.getAttribute('aria-label')).join(),
+      };
+    `);
+    duration = await cdp.run('return vid.store.duration / 705600000');
+    check('double-click puts the audio on A1 and extends the timeline', placed.onA1 === 1 && placed.drawn === 1 && placed.lanes === 4 && Math.abs(duration - 12) < 0.05, `duration ${duration.toFixed(2)} s`);
+    check('an audio clip only offers a volume slider', placed.sliders === 'Volume', placed.sliders);
+    const wrongLane = await cdp.run(`
+      const id = T.commit('Add clip', (p) => vid.model.addClip(p, { mediaId: ${JSON.stringify(toneMedia?.id)}, trackId: 'V2', at: 0 }));
+      const track = vid.model.findClip(vid.store.project, id).track.id;
+      vid.store.history.undo();
+      return track;
+    `);
+    check('audio aimed at a video track goes to an audio track', wrongLane === 'A1' || wrongLane === 'A2', wrongLane);
+
+    const withPicture = await cdp.run(`
+      await T.at(0.5);
+      vid.store.setPlaying(true);
+      await new Promise((r) => setTimeout(r, 2000));
+      const el = [...vid.player.audios.values()][0]?.el;
+      const out = el ? { playing: !el.paused, drift: Math.abs(el.currentTime - vid.store.time / 705600000) } : null;
+      vid.store.setPlaying(false);
+      return out;
+    `);
+    check('audio plays in step with the picture', Boolean(withPicture?.playing) && withPicture.drift < 0.15, withPicture ? `drift ${(withPicture.drift * 1000).toFixed(0)} ms` : 'no audio element');
+    const tail = await cdp.run(`
+      await T.at(10.3);
+      const start = vid.store.time;
+      vid.store.setPlaying(true);
+      await new Promise((r) => setTimeout(r, 1200));
+      const el = [...vid.player.audios.values()][0].el;
+      const out = { moved: (vid.store.time - start) / 705600000, playing: !el.paused, black: T.px(0.5, 0.5) };
+      vid.store.setPlaying(false);
+      await T.frames(3);
+      out.pausedAfter = el.paused;
+      return out;
+    `);
+    check('audio keeps playing over black after the picture ends', tail.playing && tail.pausedAfter && tail.moved > 0.7 && tail.moved < 1.6 && isBlack(tail.black), `${tail.moved.toFixed(2)} s in 1.2 s`);
+    await cdp.run(`vid.store.select([${JSON.stringify(placed.id)}]); await T.at(8);`);
+    const editorShot = await shot('editor.png');
 
     // 6. Autosave and reload ------------------------------------------------
     await waitFor('autosave', () => cdp.run(`return document.getElementById('save-state').textContent === 'Saved'`), 8000);
@@ -321,6 +378,13 @@ async function main() {
       check('export is letterboxed like the preview', isBlack(exportTop), `top ${exportTop}`);
       check('export colour matches preview (graded part)', near(exportA, previewA, 14), `export ${exportA}, preview ${previewA}`);
       check('export colour matches preview (ungraded part)', near(exportB, previewB, 14), `export ${exportB}, preview ${previewB}`);
+      // 10-12 s has no picture sound, so anything audible there is the audio track.
+      const loudness = async (from) => {
+        const { stderr } = await exec('ffmpeg', ['-hide_banner', '-ss', String(from), '-t', '1', '-i', job.output, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        return Number(/mean_volume: (-?[\d.]+) dB/.exec(stderr)?.[1] ?? -99);
+      };
+      const tailDb = await loudness(10.5);
+      check('exported sound includes the audio track', tailDb > -40, `${tailDb} dB at 10.5 s`);
       const link = await cdp.run(`const r = await fetch(document.getElementById('export-link').href, { method: 'HEAD' }); return r.status;`);
       check('exported file is served for download', link === 200, `HTTP ${link}`);
     }
@@ -329,7 +393,7 @@ async function main() {
     await cdp.send('Page.reload');
     await waitFor('the reloaded app', () => cdp.run('return Boolean(window.vid)'));
     await cdp.run(PAGE_HELPERS);
-    check('reload restores the saved project', (await cdp.run('return T.clips()')) === 3 && (await cdp.run('return vid.store.project.aspect')) === '9:16');
+    check('reload restores the saved project', (await cdp.run('return T.clips()')) === 4 && (await cdp.run('return vid.store.project.aspect')) === '9:16');
 
     const ignorable = (line) => /favicon/.test(line);
     const problems = cdp.problems.filter((line) => !ignorable(line));

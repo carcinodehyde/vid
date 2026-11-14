@@ -54,7 +54,20 @@ function describe(probe, filePath) {
   const streams = probe.streams ?? [];
   const video = streams.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const audio = streams.find((s) => s.codec_type === 'audio');
-  if (!video) throw new Error('No video stream found. This demo imports video files only.');
+  if (!video && !audio) throw new Error('No video or audio found in this file.');
+
+  const seconds = Number(probe.format?.duration ?? (video ?? audio).duration ?? 0);
+  if (!(seconds > 0)) throw new Error('Could not read a duration from this file.');
+  const common = {
+    name: path.basename(filePath),
+    path: filePath,
+    duration: Math.round(seconds * TICKS),
+    audioCodec: audio?.codec_name ?? null,
+    hasAudio: Boolean(audio),
+    container: probe.format?.format_name ?? '',
+    size: Number(probe.format?.size ?? 0),
+  };
+  if (!video) return { kind: 'audio', ...common, width: 0, height: 0, frameRate: 0, videoCodec: null, colorSpace: null };
 
   let width = video.width;
   let height = video.height;
@@ -64,13 +77,9 @@ function describe(probe, filePath) {
   const rotation = Math.abs(Number(sideRotation ?? video.tags?.rotate ?? 0)) % 180;
   if (rotation === 90) [width, height] = [height, width];
 
-  const seconds = Number(probe.format?.duration ?? video.duration ?? 0);
-  if (!(seconds > 0)) throw new Error('Could not read a duration from this file.');
-
   return {
-    name: path.basename(filePath),
-    path: filePath,
-    duration: Math.round(seconds * TICKS),
+    kind: 'video',
+    ...common,
     width,
     height,
     frameRate: Number((parseRate(video.avg_frame_rate) || parseRate(video.r_frame_rate)).toFixed(3)),
@@ -81,10 +90,6 @@ function describe(probe, filePath) {
     colorSpace: [video.color_space, video.color_primaries, video.color_transfer].every((tag) => tag && tag !== 'unknown')
       ? video.color_space
       : null,
-    audioCodec: audio?.codec_name ?? null,
-    hasAudio: Boolean(audio),
-    container: probe.format?.format_name ?? '',
-    size: Number(probe.format?.size ?? 0),
   };
 }
 
@@ -143,18 +148,20 @@ export class MediaStore {
 
     const id = await fingerprint(absolute, stat);
     const cached = this.items.get(id);
-    if (cached && cached.path === absolute) return { ...cached, cached: true };
+    if (cached && cached.path === absolute && cached.kind) return { ...cached, cached: true };
 
     const { stdout } = await run('ffprobe', [
       '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', absolute,
     ]);
     const info = { id, ...describe(JSON.parse(stdout), absolute), proxy: cached?.proxy ?? false };
 
+    // Poster: one frame for video, the whole waveform for audio.
     const seconds = info.duration / TICKS;
-    await run('ffmpeg', [
-      '-v', 'error', '-ss', String(Math.min(5, seconds * 0.1).toFixed(3)), '-i', absolute,
-      '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '4', '-y', this.thumbPath(id),
-    ]).catch(() => {});
+    const poster =
+      info.kind === 'audio'
+        ? ['-i', absolute, '-filter_complex', 'aformat=channel_layouts=mono,showwavespic=s=1600x120:colors=0x5ad1c0:scale=sqrt:draw=full', '-frames:v', '1', '-q:v', '3']
+        : ['-ss', String(Math.min(5, seconds * 0.1).toFixed(3)), '-i', absolute, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '4'];
+    await run('ffmpeg', ['-v', 'error', ...poster, '-y', this.thumbPath(id)]).catch(() => {});
 
     this.items.set(id, info);
     await fs.writeFile(path.join(this.cacheDir, `${id}.json`), JSON.stringify(info, null, 2));
@@ -168,10 +175,13 @@ export class MediaStore {
     if (!info.proxy) {
       const target = this.proxyPath(id);
       const partial = `${target}.part.mp4`;
+      const picture =
+        info.kind === 'audio'
+          ? ['-vn']
+          : ['-vf', 'scale=-2:min(720\\,ih)', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26', '-pix_fmt', 'yuv420p', '-g', '30'];
       await run('ffmpeg', [
-        '-v', 'error', '-i', info.path,
-        '-vf', 'scale=-2:min(720\\,ih)', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
-        '-pix_fmt', 'yuv420p', '-g', '30', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-y', partial,
+        '-v', 'error', '-i', info.path, ...picture,
+        '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-y', partial,
       ]);
       await fs.rename(partial, target);
       info.proxy = true;

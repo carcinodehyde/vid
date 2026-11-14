@@ -1,10 +1,11 @@
 // Inspector: placement, volume and color sliders for the selected clips.
+// Clips on audio tracks only have a volume.
 // The controls are built once per selection and then only have their values
 // refreshed, so a slider is never replaced while it is being dragged.
 
 import { COLOR_PARAMS, DEFAULT_COLOR } from '/shared/color.js';
 import { FIT_MODES } from '/shared/geometry.js';
-import { findClip, updateClips } from '/shared/model.js';
+import { findClip, trackKind, updateClips } from '/shared/model.js';
 import { formatTimecode } from '/shared/time.js';
 
 // Sliders show friendly units; `scale` converts them to the stored value.
@@ -132,11 +133,14 @@ export function initInspector(store) {
     });
 
     const nodes = [title, sub];
-    nodes.push(
-      group('Placement', () => store.history.commit('Reset placement', (p) => updateClips(p, selectedIds(), PLACEMENT_DEFAULTS))),
-      fitButtons(),
-    );
-    for (const item of PLACEMENT) {
+    const pictures = ids.every((id) => trackKind(findClip(store.project, id).track) === 'video');
+    if (pictures) {
+      nodes.push(
+        group('Placement', () => store.history.commit('Reset placement', (p) => updateClips(p, selectedIds(), PLACEMENT_DEFAULTS))),
+        fitButtons(),
+      );
+    }
+    for (const item of pictures ? PLACEMENT : []) {
       nodes.push(
         slider({
           ...item,
@@ -161,7 +165,7 @@ export function initInspector(store) {
     );
 
     let lastGroup = null;
-    for (const param of COLOR_PARAMS) {
+    for (const param of pictures ? COLOR_PARAMS : []) {
       if (param.group !== lastGroup) {
         lastGroup = param.group;
         const keys = COLOR_PARAMS.filter((p) => p.group === param.group).map((p) => p.key);

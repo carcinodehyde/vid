@@ -3,17 +3,23 @@
 // While a clip is playing the playhead follows the video's own clock, so sound
 // and picture cannot drift; across gaps it follows the wall clock.
 
-import { clipAt } from '/shared/model.js';
+//
+// Clips on audio tracks each get an <audio> element that is kept in step with
+// the playhead. When no picture is playing, the first of them is the clock.
+
+import { audioClipsAt, clipAt } from '/shared/model.js';
 import { TICKS, frameTicks } from '/shared/time.js';
 import { api } from './api.js';
 
 const SEEK_TOLERANCE = 0.3; // seconds of mismatch treated as a cut rather than drift
+const AUDIO_TOLERANCE = 0.12; // audio tracks are pulled back in line sooner
 
 export class Player {
   constructor(store, renderer) {
     this.store = store;
     this.renderer = renderer;
     this.videos = new Map();
+    this.audios = new Map(); // "trackId:mediaId" -> { mediaId, el }
     this.dirty = true;
     this.lastNow = performance.now();
 
@@ -35,7 +41,7 @@ export class Player {
     video = document.createElement('video');
     video.preload = 'auto';
     video.playsInline = true;
-    video.src = `/media/${mediaId}`;
+    video.src = this.sourceUrl(mediaId);
     const markDirty = () => {
       this.dirty = true;
     };
@@ -51,20 +57,41 @@ export class Player {
     return video;
   }
 
-  // The browser cannot play this file: ask the server for an H.264 proxy once.
-  async recover(mediaId, video) {
+  sourceUrl(mediaId) {
+    return `/media/${mediaId}${this.store.mediaStatus.get(mediaId) === 'proxy' ? '?proxy=1' : ''}`;
+  }
+
+  // One element per track and source: clips on one track never overlap, but
+  // the same file may sound on two tracks at once.
+  audioFor(trackId, mediaId) {
+    const key = `${trackId}:${mediaId}`;
+    let entry = this.audios.get(key);
+    if (entry) return entry.el;
+    const el = new Audio();
+    el.preload = 'auto';
+    el.src = this.sourceUrl(mediaId);
+    el.addEventListener('error', () => this.recover(mediaId, el));
+    entry = { mediaId, el };
+    this.audios.set(key, entry);
+    return el;
+  }
+
+  // The browser cannot play this file: ask the server for a proxy once.
+  async recover(mediaId, element) {
     const status = this.store.mediaStatus.get(mediaId);
     if (status === 'proxying' || status === 'broken') return;
     if (status === 'proxy') {
-      this.store.setMediaStatus(mediaId, 'broken');
+      // Another element already had the proxy built; this one just switches.
+      if (element.src.includes('proxy=1')) this.store.setMediaStatus(mediaId, 'broken');
+      else element.src = this.sourceUrl(mediaId);
       return;
     }
     this.store.setMediaStatus(mediaId, 'proxying');
     try {
       await api.buildProxy(mediaId);
       this.store.setMediaStatus(mediaId, 'proxy');
-      video.src = `/media/${mediaId}?proxy=1`;
-      video.load();
+      element.src = this.sourceUrl(mediaId);
+      element.load();
     } catch {
       this.store.setMediaStatus(mediaId, 'broken');
     }
@@ -72,12 +99,53 @@ export class Player {
   }
 
   prune() {
+    const release = (element) => {
+      element.pause();
+      element.removeAttribute('src');
+      element.load();
+    };
     for (const [mediaId, video] of this.videos) {
       if (this.store.project.media[mediaId]) continue;
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
+      release(video);
       this.videos.delete(mediaId);
+    }
+    for (const [key, { mediaId, el }] of this.audios) {
+      if (this.store.project.media[mediaId]) continue;
+      release(el);
+      this.audios.delete(key);
+    }
+  }
+
+  // Audio-track clips under the playhead, with their elements and the source
+  // time each should be at.
+  audioAt(project, t) {
+    return audioClipsAt(project, t)
+      .filter(({ clip }) => this.usable(clip.mediaId))
+      .map(({ track, clip }) => ({
+        track,
+        clip,
+        el: this.audioFor(track.id, clip.mediaId),
+        target: (clip.markIn + (t - clip.begin)) / TICKS,
+      }));
+  }
+
+  // Start, stop and re-seek the audio elements so they match the playhead.
+  syncAudio(project) {
+    const { store } = this;
+    const wanted = new Set();
+    for (const { track, clip, el, target } of this.audioAt(project, store.time)) {
+      wanted.add(el);
+      el.muted = track.muted;
+      el.volume = Math.min(1, clip.volume);
+      if (!el.seeking && Math.abs(el.currentTime - target) > AUDIO_TOLERANCE) el.currentTime = target;
+      if (store.playing) {
+        if (el.paused && !el.ended) el.play().catch(() => {});
+      } else if (!el.paused) {
+        el.pause();
+      }
+    }
+    for (const { el } of this.audios.values()) {
+      if (!wanted.has(el) && !el.paused) el.pause();
     }
   }
 
@@ -125,8 +193,13 @@ export class Player {
         if (!active.seeking && Math.abs(active.currentTime - target) > halfFrame) active.currentTime = target;
       }
     } else if (store.playing) {
-      this.advanceTo(store.time + elapsed * TICKS);
+      // No picture: follow an audio clip that is playing in step, else the wall clock.
+      const lead = this.audioAt(project, store.time).find(
+        ({ el, target }) => !el.paused && !el.seeking && el.readyState >= 3 && Math.abs(el.currentTime - target) <= AUDIO_TOLERANCE,
+      );
+      this.advanceTo(lead ? lead.clip.begin + (lead.el.currentTime * TICKS - lead.clip.markIn) : store.time + elapsed * TICKS);
     }
+    this.syncAudio(project);
 
     if (store.playing || this.dirty) {
       if (!hit) {

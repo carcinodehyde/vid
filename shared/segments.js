@@ -1,13 +1,15 @@
 // Flatten the tracks into the single sequence the viewer actually sees: a list
 // of back-to-back spans, each showing one clip or nothing. Preview and export
-// both follow this rule, so what you scrub is what gets rendered.
+// both follow this rule, so what you scrub is what gets rendered. Audio tracks
+// do not cut the picture; they only extend the total length.
 
-import { clipAt, projectDuration } from './model.js';
+import { clipAt, projectDuration, trackKind } from './model.js';
 
 export function flatten(project) {
   const total = projectDuration(project);
   const cuts = new Set([0, total]);
   for (const track of project.tracks) {
+    if (trackKind(track) !== 'video') continue;
     for (const clip of track.clips) {
       cuts.add(clip.begin);
       cuts.add(clip.end);

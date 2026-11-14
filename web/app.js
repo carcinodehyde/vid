@@ -29,7 +29,7 @@ async function main() {
   } catch (error) {
     console.warn('Could not load the saved project:', error);
   }
-  const store = new Store(saved ?? model.createProject());
+  const store = new Store(saved ? model.upgradeProject(saved) : model.createProject());
 
   let renderer;
   try {

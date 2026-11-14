@@ -1,13 +1,14 @@
 // Render: turn the flattened timeline into one FFmpeg filter graph. Every span
 // is scaled and positioned with the same destRect() the preview uses and graded
-// with the same LUT, then the spans are concatenated.
+// with the same LUT, then the spans are concatenated. Clips on audio tracks are
+// delayed to their position and mixed over the result.
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { bakeLut, colorKey, isIdentityColor, lutToCube } from '../shared/color.js';
 import { destRect } from '../shared/geometry.js';
-import { projectDuration } from '../shared/model.js';
+import { projectDuration, trackKind } from '../shared/model.js';
 import { flatten } from '../shared/segments.js';
 import { TICKS } from '../shared/time.js';
 import { run } from './media.js';
@@ -90,7 +91,36 @@ export function buildExport(project, resolveMediaPath, outputPath) {
     concatPads.push(`[v${i}][a${i}]`);
   });
 
-  filters.push(`${concatPads.join('')}concat=n=${spans.length}:v=1:a=1[v][a]`);
+  // Audio tracks: each clip is cut from its source, delayed to where it sits
+  // on the timeline, and summed with the sound of the picture.
+  const mixPads = [];
+  for (const track of project.tracks) {
+    if (trackKind(track) !== 'audio' || track.muted) continue;
+    for (const clip of track.clips) {
+      const media = project.media[clip.mediaId];
+      if (!media?.hasAudio || !(clip.volume > 0)) continue;
+      const input = inputs.length / 6;
+      const duration = seconds(clip.end - clip.begin);
+      inputs.push('-ss', seconds(clip.markIn), '-t', duration, '-i', resolveMediaPath(clip.mediaId));
+      const pad = `[m${mixPads.length}]`;
+      const delay = Math.round((clip.begin / TICKS) * 48000);
+      filters.push(
+        `[${input}:a]${AUDIO},volume=${clip.volume.toFixed(3)},atrim=duration=${duration},asetpts=PTS-STARTPTS,adelay=${delay}S:all=1${pad}`,
+      );
+      mixPads.push(pad);
+    }
+  }
+
+  const concat = `${concatPads.join('')}concat=n=${spans.length}:v=1:a=1`;
+  if (mixPads.length) {
+    // Sum without rescaling, then catch peaks the sum pushes over full scale.
+    filters.push(
+      `${concat}[v][base]`,
+      `[base]${mixPads.join('')}amix=inputs=${mixPads.length + 1}:normalize=0:duration=first,alimiter=limit=0.98:level=0[a]`,
+    );
+  } else {
+    filters.push(`${concat}[v][a]`);
+  }
 
   const args = [
     '-hide_banner', '-nostats', '-progress', 'pipe:1', '-y',

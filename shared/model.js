@@ -3,19 +3,29 @@
 // snapshots, so nothing here knows about undo.
 //
 //   project { width, height, aspect, fps, rippleMode, media{}, tracks[] }
-//   track   { id, name, muted, hidden, locked, clips[] }      tracks[0] is on top
+//   media   { id, kind: 'video' | 'audio', duration, width, height, ... }
+//   track   { id, name, kind, muted, hidden, locked, clips[] }  tracks[0] is on top
 //   clip    { id, mediaId, begin, end, markIn, fit, scale, posX, posY, volume, color }
 //
 // begin/end are timeline positions and markIn is the offset into the source,
 // all in ticks (time.js). A clip plays source [markIn, markIn + end - begin).
+//
+// Video tracks hold video files and decide the picture (and its sound); audio
+// tracks hold audio files and are mixed on top. A clip only ever sits on a
+// track of its own kind.
 
 import { DEFAULT_COLOR } from './color.js';
 import { ASPECTS } from './geometry.js';
 import { floorToFrame, frameTicks, snapToFrame } from './time.js';
 
+const makeTrack = (id, kind) => ({ id, name: id, kind, muted: false, hidden: false, locked: false, clips: [] });
+
+export const trackKind = (track) => track.kind ?? 'video';
+export const mediaKind = (media) => media?.kind ?? 'video';
+
 export function createProject() {
   return {
-    version: 1,
+    version: 2,
     name: 'Untitled',
     aspect: '16:9',
     width: ASPECTS['16:9'][0],
@@ -23,12 +33,20 @@ export function createProject() {
     fps: { num: 30, den: 1 },
     rippleMode: false,
     media: {},
-    tracks: [
-      { id: 'V2', name: 'V2', muted: false, hidden: false, locked: false, clips: [] },
-      { id: 'V1', name: 'V1', muted: false, hidden: false, locked: false, clips: [] },
-    ],
+    tracks: [makeTrack('V2', 'video'), makeTrack('V1', 'video'), makeTrack('A1', 'audio'), makeTrack('A2', 'audio')],
     nextId: 1,
   };
+}
+
+// Bring a project saved by an older version up to date (in place).
+export function upgradeProject(project) {
+  for (const track of project.tracks) track.kind = trackKind(track);
+  for (const media of Object.values(project.media)) media.kind = mediaKind(media);
+  if (!project.tracks.some((track) => track.kind === 'audio')) {
+    project.tracks.push(makeTrack('A1', 'audio'), makeTrack('A2', 'audio'));
+  }
+  project.version = 2;
+  return project;
 }
 
 const newId = (project) => `c${project.nextId++}`;
@@ -63,10 +81,29 @@ export function trackEnd(track) {
   return track.clips.reduce((end, clip) => Math.max(end, clip.end), 0);
 }
 
+// Where a source goes when no suitable track was named: the lowest video
+// track for video, the first audio track for audio, skipping locked ones.
+export function defaultTrackFor(project, mediaId) {
+  const kind = mediaKind(project.media[mediaId]);
+  const open = project.tracks.filter((track) => trackKind(track) === kind && !track.locked);
+  return (kind === 'video' ? open.at(-1) : open[0]) ?? null;
+}
+
+// Every audio-track clip sounding at time t.
+export function audioClipsAt(project, t) {
+  const hits = [];
+  for (const track of project.tracks) {
+    if (trackKind(track) !== 'audio') continue;
+    const clip = track.clips.find((c) => c.begin <= t && t < c.end);
+    if (clip) hits.push({ track, clip });
+  }
+  return hits;
+}
+
 // The clip the viewer sees at time t: first hit scanning tracks from the top.
 export function clipAt(project, t) {
   for (const track of project.tracks) {
-    if (track.hidden) continue;
+    if (track.hidden || trackKind(track) !== 'video') continue;
     const clip = track.clips.find((c) => c.begin <= t && t < c.end);
     if (clip) return { track, clip };
   }
@@ -182,12 +219,14 @@ export function addMedia(project, info) {
   return info.id;
 }
 
-// Put a source on a track. `at` defaults to the end of the track.
-export function addClip(project, { mediaId, trackId, at = null }) {
+// Put a source on a track. `at` defaults to the end of the track. A source
+// aimed at a track of the wrong kind (or at none) goes to its default track.
+export function addClip(project, { mediaId, trackId = null, at = null }) {
   const media = project.media[mediaId];
-  const track = getTrack(project, trackId);
-  if (!media || !track) throw new Error('Unknown media or track');
-  if (track.locked) return null;
+  let track = trackId === null ? null : getTrack(project, trackId);
+  if (!media || (trackId !== null && !track)) throw new Error('Unknown media or track');
+  if (!track || trackKind(track) !== mediaKind(media)) track = defaultTrackFor(project, mediaId);
+  if (!track || track.locked) return null;
   const duration = sourceDuration(project, mediaId);
   const begin = at === null ? trackEnd(track) : Math.max(0, snapToFrame(at, project.fps));
   const clip = {
@@ -253,9 +292,12 @@ export function trimClip(project, clipId, edge, t) {
 // Move a clip to another position and/or track; it lands in the nearest gap.
 export function moveClip(project, clipId, trackId, desiredBegin) {
   const found = findClip(project, clipId);
-  const target = getTrack(project, trackId);
-  if (!found || !target || found.track.locked || target.locked) return false;
+  const named = getTrack(project, trackId);
+  if (!found || !named) return false;
   const { track, clip } = found;
+  // Dragged over a track of the other kind: it stays on its own track.
+  const target = trackKind(named) === trackKind(track) ? named : track;
+  if (track.locked || target.locked) return false;
   const duration = clip.end - clip.begin;
   track.clips.splice(track.clips.indexOf(clip), 1);
   const begin = findFreeBegin(target, Math.max(0, snapToFrame(desiredBegin, project.fps)), duration);
@@ -329,7 +371,9 @@ export function validate(project) {
   for (const track of project.tracks) {
     const clips = [...track.clips].sort((a, b) => a.begin - b.begin);
     clips.forEach((clip, i) => {
-      if (!project.media[clip.mediaId]) problems.push(`${clip.id}: missing media`);
+      const media = project.media[clip.mediaId];
+      if (!media) problems.push(`${clip.id}: missing media`);
+      else if (mediaKind(media) !== trackKind(track)) problems.push(`${clip.id}: ${mediaKind(media)} clip on a ${trackKind(track)} track`);
       if (clip.begin < 0) problems.push(`${clip.id}: starts before zero`);
       if (clip.end <= clip.begin) problems.push(`${clip.id}: empty or reversed`);
       if (clip.markIn < 0) problems.push(`${clip.id}: negative source offset`);
