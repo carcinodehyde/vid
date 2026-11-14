@@ -2,6 +2,8 @@
   "name": "vid",
   "version": "0.1.0",
   "description": "A small non-linear video editor: import, timeline, aspect ratio, color correction, export.",
+  "license": "MIT",
+  "author": "carcinodehyde",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,8 +11,79 @@
   },
   "scripts": {
     "start": "node server/server.js",
+    "app": "electron .",
+    "dist": "electron-builder",
     "test": "node --test",
     "samples": "node tools/make-samples.js",
     "smoke": "node tools/smoke.js"
+  },
+  "main": "electron/main.js",
+  "build": {
+    "appId": "local.vid.editor",
+    "productName": "vid",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "server/**",
+      "shared/**",
+      "web/**",
+      "package.json",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/@ffprobe-installer/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.video"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "copyright": "Copyright (c) 2026 carcinodehyde",
+    "extraFiles": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE.vid.txt"
+      },
+      {
+        "from": "THIRD-PARTY-NOTICES.md",
+        "to": "THIRD-PARTY-NOTICES.md"
+      },
+      {
+        "from": "node_modules/ffmpeg-static",
+        "to": "licenses/ffmpeg",
+        "filter": [
+          "*.LICENSE",
+          "*.README"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "@ffprobe-installer/ffprobe": "^2.1.2",
+    "ffmpeg-static": "^5.3.0"
+  },
+  "devDependencies": {
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0"
   }
 }

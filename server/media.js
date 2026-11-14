@@ -3,7 +3,8 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -11,9 +12,40 @@ import { TICKS } from '../shared/time.js';
 
 const WAVEFORM = 'aformat=channel_layouts=mono,showwavespic=s=1600x120:colors=0x5ad1c0:scale=sqrt:draw=full';
 
+// Where ffmpeg and ffprobe live: VID_FFMPEG / VID_FFPROBE when set, else the
+// copies installed with the app (the ffmpeg-static and
+// @ffprobe-installer/ffprobe packages), else whatever is on PATH.
+const require = createRequire(import.meta.url);
+const tools = new Map();
+export function toolPath(name) {
+  if (tools.has(name)) return tools.get(name);
+  let found = process.env[`VID_${name.toUpperCase()}`] || null;
+  if (!found) {
+    try {
+      const bundled = name === 'ffmpeg' ? require('ffmpeg-static') : require('@ffprobe-installer/ffprobe').path;
+      // Inside a packaged app the binaries sit next to the archive, not in it.
+      const real = bundled?.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
+      if (real && existsSync(real)) found = real;
+    } catch {
+      // Not installed: fall back to PATH.
+    }
+  }
+  tools.set(name, found || name);
+  return tools.get(name);
+}
+
+const running = new Set();
+// Stop every ffmpeg still at work (the app is quitting).
+export function stopAll() {
+  for (const child of running) child.kill();
+}
+
 export function run(command, args, { cwd, onStdout } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, windowsHide: true });
+    const child = spawn(toolPath(command), args, { cwd, windowsHide: true });
+    running.add(child);
+    child.on('close', () => running.delete(child));
+    child.on('error', () => running.delete(child));
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => {

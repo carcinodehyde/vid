@@ -2,19 +2,37 @@
 
 A small local video editor: import of video and audio files, a timeline with
 two video and two audio tracks, aspect-ratio change, colour correction, and export. A Node server on 127.0.0.1 plus a browser UI;
-FFmpeg does probing, thumbnails and the final render. No npm dependencies.
+FFmpeg does probing, thumbnails and the final render. It runs in the browser
+or as an Electron desktop app, and brings its own ffmpeg and ffprobe.
+
+![The vid editor: media bin, preview, inspector and timeline](docs/screenshot.png)
 
 ## Run
 
-Needs Node 22+ and `ffmpeg` / `ffprobe` on PATH.
+Needs Node 22+.
 
-    npm start            # then open http://127.0.0.1:5175
+    npm install          # Electron, the builder, and ffmpeg / ffprobe binaries
+    npm start            # browser version: then open http://127.0.0.1:5175
+    npm run app          # desktop version: the same editor in an Electron window
+    npm run dist         # build an installer for this platform into dist/
     npm run samples      # optional: writes two test videos and a tone to samples/
     npm test             # unit tests for the model, colour, geometry and export graph
     npm run smoke        # drives the real page in headless Chrome end to end
 
 `PORT` and `VID_DATA_DIR` change the port and where the project, cache and
 exports are kept (default `data/`).
+
+**ffmpeg / ffprobe** come from the `ffmpeg-static` and
+`@ffprobe-installer/ffprobe` packages, so nothing has to be on PATH. Set
+`VID_FFMPEG` / `VID_FFPROBE` to use other binaries; if the packages are not
+installed, the ones on PATH are used.
+
+**Desktop app** (`electron/main.js`): starts the same server inside the app on a
+free loopback port. The project and caches live in the per-user app data folder
+and exports go to `Videos/vid` (File > Open exports folder). `npm run dist`
+uses electron-builder (config under `build` in `package.json`) and packs the
+binaries for the platform it runs on: an NSIS installer on Windows, a dmg on
+macOS, an AppImage on Linux. The build is unsigned and uses the default icon.
 
 ## Using it
 
@@ -66,3 +84,9 @@ exports are kept (default `data/`).
   below, which is what Chrome does.
 - Undo keeps whole-project snapshots (fine at this size, not for huge projects).
 - Tested in Chrome only.
+
+## Licence
+
+vid's source code is under the MIT License (`LICENSE`). The built desktop app
+also contains FFmpeg (GPL v3) and Electron; see `THIRD-PARTY-NOTICES.md`, which
+is copied into the app together with the licence texts.

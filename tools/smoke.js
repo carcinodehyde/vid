@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { toolPath } from '../server/media.js';
 import { makeSamples } from './make-samples.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,7 +129,7 @@ async function framePixel(file, seconds, fx, fy, width, height) {
   const x = Math.floor(fx * width);
   const y = Math.floor(fy * height);
   const { stdout } = await exec(
-    'ffmpeg',
+    toolPath('ffmpeg'),
     ['-v', 'error', '-ss', String(seconds), '-i', file, '-frames:v', '1', '-vf', `crop=2:2:${x - (x % 2)}:${y - (y % 2)},scale=in_color_matrix=bt709:in_range=tv,format=rgb24`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
     { encoding: 'buffer' },
   );
@@ -409,7 +410,7 @@ async function main() {
     const exportShot = await shot('export-dialog.png');
     check('export finishes', job.state === 'done', job.error ?? job.file);
     if (job.state === 'done') {
-      const probe = JSON.parse((await exec('ffprobe', ['-v', 'error', '-of', 'json', '-show_streams', '-show_format', job.output])).stdout);
+      const probe = JSON.parse((await exec(toolPath('ffprobe'), ['-v', 'error', '-of', 'json', '-show_streams', '-show_format', job.output])).stdout);
       const video = probe.streams.find((s) => s.codec_type === 'video');
       const audio = probe.streams.find((s) => s.codec_type === 'audio');
       const length = Number(probe.format.duration);
@@ -423,7 +424,7 @@ async function main() {
       check('export colour matches preview (ungraded part)', near(exportB, previewB, 14), `export ${exportB}, preview ${previewB}`);
       // 10-12 s has no picture sound, so anything audible there is the audio track.
       const loudness = async (from) => {
-        const { stderr } = await exec('ffmpeg', ['-hide_banner', '-ss', String(from), '-t', '1', '-i', job.output, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
+        const { stderr } = await exec(toolPath('ffmpeg'), ['-hide_banner', '-ss', String(from), '-t', '1', '-i', job.output, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
         return Number(/mean_volume: (-?[\d.]+) dB/.exec(stderr)?.[1] ?? -99);
       };
       const tailDb = await loudness(10.5);

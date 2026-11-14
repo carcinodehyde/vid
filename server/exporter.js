@@ -137,8 +137,8 @@ export function buildExport(project, resolveMediaPath, outputPath) {
 }
 
 export class ExportQueue {
-  constructor(dataDir, media) {
-    this.dir = path.join(dataDir, 'exports');
+  constructor(dataDir, media, exportDir = null) {
+    this.dir = exportDir || path.join(dataDir, 'exports');
     this.media = media;
     this.jobs = new Map();
     this.counter = 0;

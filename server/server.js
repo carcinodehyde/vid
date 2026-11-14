@@ -12,9 +12,11 @@ import { ExportQueue } from './exporter.js';
 import { MediaStore } from './media.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = Number(process.env.PORT || 5175);
-const DATA_DIR = path.resolve(process.env.VID_DATA_DIR || path.join(ROOT, 'data'));
-const PROJECT_FILE = path.join(DATA_DIR, 'project.json');
+// Set by startServer().
+let PORT;
+let PROJECT_FILE;
+let media;
+let exportsQueue;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -37,9 +39,6 @@ const MIME = {
   '.opus': 'audio/ogg',
   '.flac': 'audio/flac',
 };
-
-const media = new MediaStore(DATA_DIR);
-const exportsQueue = new ExportQueue(DATA_DIR, media);
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -204,18 +203,38 @@ async function handle(req, res) {
   throw new HttpError(404, 'Not found');
 }
 
-await fs.mkdir(DATA_DIR, { recursive: true });
-await media.init();
+// Start the editor's server. `port` 0 picks any free port; `exportDir`
+// defaults to exports/ inside the data folder. One server per process.
+export async function startServer({ port = 5175, dataDir = path.join(ROOT, 'data'), exportDir = null } = {}) {
+  const root = path.resolve(dataDir);
+  PROJECT_FILE = path.join(root, 'project.json');
+  media = new MediaStore(root);
+  exportsQueue = new ExportQueue(root, media, exportDir && path.resolve(exportDir));
+  await fs.mkdir(root, { recursive: true });
+  await media.init();
 
-const server = http.createServer((req, res) => {
-  handle(req, res).catch((error) => {
-    const status = error.status || 500;
-    if (status === 500) console.error(error);
-    if (res.headersSent) res.destroy();
-    else sendJson(res, status, { error: error.message });
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch((error) => {
+      const status = error.status || 500;
+      if (status === 500) console.error(error);
+      if (res.headersSent) res.destroy();
+      else sendJson(res, status, { error: error.message });
+    });
   });
-});
-server.requestTimeout = 0;
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`vid editor running at http://127.0.0.1:${PORT}`);
-});
+  server.requestTimeout = 0;
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  PORT = server.address().port;
+  return { server, port: PORT, url: `http://127.0.0.1:${PORT}/`, exportDir: exportsQueue.dir };
+}
+
+// Run directly (npm start): the browser version.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { url } = await startServer({
+    port: Number(process.env.PORT || 5175),
+    dataDir: process.env.VID_DATA_DIR || path.join(ROOT, 'data'),
+  });
+  console.log(`vid editor running at ${url.slice(0, -1)}`);
+}
